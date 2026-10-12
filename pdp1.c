@@ -411,7 +411,10 @@ add(int a, int b)
 void
 PerformInstruction(int instruction)
 {
-    int operator, tmpaddr, i, cond, sign, mb, v ;
+    int operator, tmpaddr, i, cond, sign ;
+#ifdef PDP1_MUL_DIV
+    int mb, v ;
+#endif
 
     switch (operator=OPERATOR(instruction)) {
     case ADD:
@@ -679,8 +682,10 @@ PerformInstruction(int instruction)
 	{ 
 	    int opr = instruction&07777 ;
 	    if (opr & 04000) IO = 0 ;
-	    if (opr & 02000) AC = 0 ;
-	    if (opr & 00200) AC = 0 ;
+	    if (opr & 02000)
+		AC = SW ;		/* lat: load the Test Word switches */
+	    else if (opr & 00200)
+		AC = 0 ;		/* cla */
 	    if (opr & 01000) AC ^= 0777777 ;
 	    if (opr & 00100) {
 		abort() ;
@@ -759,13 +764,35 @@ PerformInstruction(int instruction)
 		abort() ;
 	} 
 	break ;
-#if 0
-    /* The original PDP1 implemented these two instructions that
-     * helped implement multiply and divide.  Later versions implemented
-     * an actual multiply and divide using the same opcodes.  Spacewar! 
-     * requires the MUS/DIS version, whereas the Snowflake Demo requires
-     * MUL/DIV.
-     */
+#ifdef PDP1_MUL_DIV
+    /* Later PDP-1s implemented a hardware multiply and divide using the
+     * same opcodes.  Select it with -DPDP1_MUL_DIV (needed by e.g. the
+     * Snowflake demo).  Spacewar! needs the original step instructions. */
+    case MUL:
+	DEBUG(MUL) ;
+        tmpaddr = Y(instruction) ;
+        mb = Mem[tmpaddr] ;
+        sign = SIGN(AC) ^ SIGN(mb) ;
+        IO = SIGN(AC) ? (AC^0777777) : AC ;
+        v = SIGN(mb) ? (mb^0777777) : mb ;
+        for (i= AC = 0; i<17; i++) {
+            if (IO & 1)
+                AC = AC + v ;
+            IO = (IO >> 1) | ((AC & 1) << 17) ;
+            AC = AC >> 1 ;
+        }
+        if (sign && (AC | IO)) {
+            AC = AC ^ 0777777 ;
+            IO = IO ^ 0777777 ;
+        }
+	break ;
+    case DIV:
+	DEBUG(DIV) ;
+        abort() ;
+	break ;
+#else
+    /* The original PDP-1 implemented multiply and divide as repeated
+     * steps.  Spacewar! requires this version. */
     case MUS:	/* multiply step */
 	DEBUG(MUS) ;
 	tmpaddr = Y(instruction) ;
@@ -790,29 +817,6 @@ PerformInstruction(int instruction)
 	    AC += 1 + Mem[tmpaddr] ;
 	AC = (AC + (AC >> 18)) & 0777777 ;
 	if (AC == NEGATIVE_ZERO) AC = 0 ;
-	break ;
-#else
-    case MUL:
-	DEBUG(MUL) ;
-        tmpaddr = Y(instruction) ;
-        mb = Mem[tmpaddr] ;
-        sign = SIGN(AC) ^ SIGN(mb) ;
-        IO = SIGN(AC) ? (AC^0777777) : AC ;
-        v = SIGN(mb) ? (mb^0777777) : mb ;
-        for (i= AC = 0; i<17; i++) {
-            if (IO & 1)
-                AC = AC + v ;
-            IO = (IO >> 1) | ((AC & 1) << 17) ;
-            AC = AC >> 1 ;
-        }
-        if (sign && (AC | IO)) {
-            AC = AC ^ 0777777 ;
-            IO = IO ^ 0777777 ;
-        }
-	break ;
-    case DIV:
-	DEBUG(DIV) ;
-        abort() ;
 	break ;
 #endif
 
