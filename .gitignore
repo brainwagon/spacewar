@@ -1,13 +1,16 @@
-# Baseline import of the PDP-1 simulator.
-# Track authored source only. Build products, generated data, media and
-# backups are ignored (allowlist below: ignore everything, re-include source).
+# PDP-1 simulator. Track authored source only.
+#
+# Strategy: ignore everything by default, then re-include source files. Any
+# generated or derived file is therefore ignored automatically. The section
+# at the bottom names the generated files explicitly so the intent is clear
+# and so they stay ignored if the allowlist is ever relaxed.
 
 *
 
 # allow directory traversal
 !*/
 
-# source
+# ---- authored source ----
 !*.c
 !*.h
 !*.pl
@@ -17,7 +20,36 @@
 !README
 !.gitignore
 
-# generated data headers (arrays pulled in from paper-tape images)
+# ---- generated / derived files (explicit) ----
+# compiled binaries and objects
+*.o
+*.a
+a.out
+pdp1
+pdp1dump
+core
+*.core
+
+# data headers generated from paper-tape / bitmap images
+spacewar.mem.h
 snowflake.h
 snowflake2.h
-spacewar.mem.h
+
+# tape images and assembler listings produced by the toolchain
+spacewar.bin
+*.lst
+
+# editor and version backups
+*.orig
+*.sav
+*.bak
+*~
+*.dsp
+*.dsw
+
+# generated media and archives
+*.mp4
+*.mpg
+*.gif
+*.pdf
+*.zip
