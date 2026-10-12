@@ -105,6 +105,17 @@ PDP1Word Mem[MEMORY_SIZE] = {
 #define PDP1_HZ			200000.0
 #define MAXSTEPS_PER_TICK	200000	/* bound catch-up work per timer tick */
 
+/* Time constant for phosphor hit accumulation (emulated seconds). */
+#define PHOS_CHARGE_HALFLIFE	0.20
+
+/* Type 30 display intensity, from the 3-bit field in the dpy instruction
+ * (bits 6-8).  It is in 1's complement: 3 is brightest, 0 the default and
+ * 7 (-0) barely visible.  These are brightness multipliers. */
+static const float DpyBrightness[8] = {
+    0.70, 0.85, 0.95, 1.00,	/* 0 (default) .. 3 (brightest) */
+    0.55, 0.35, 0.18, 0.06	/* 4 .. 7 (-0, barely visible) */
+} ;
+
 int executed ; 	/* number of instructions executed */
 double emu_cycles = 0.0 ;	/* PDP-1 cycles executed (drives phosphor timing) */
 
@@ -174,6 +185,8 @@ typedef struct t_phosphordot {
     struct t_phosphordot *next ;
     int x, y, age ;
     double t ;		/* emulated time (seconds) when last painted */
+    float level ;	/* brightness of the most recent hit (0..1) */
+    float charge ;	/* accumulated exposure, decays over emulated time */
 } Dot ;
 
 Dot *FreeDot = NULL ;
@@ -215,14 +228,19 @@ FindDot(int x, int y)
 }
 
 void
-NewDot(int x, int y)
+NewDot(int x, int y, float level)
 {
     Dot *dot ;
     int idx ;
+    double now = EmuSeconds() ;
 
     if ((dot=FindDot(x, y))) {
+	/* Refresh: let the previous exposure decay, then add this hit. */
+	float decay = exp(-(now - dot->t) / PHOS_CHARGE_HALFLIFE) ;
 	dot->age = 0 ;
-	dot->t = EmuSeconds() ;
+	dot->charge = dot->charge * decay + 1.0 ;
+	dot->level = level ;
+	dot->t = now ;
 	return ;
     }
 
@@ -238,7 +256,9 @@ NewDot(int x, int y)
     dot->x = x ;
     dot->y = y ;
     dot->age = 0 ;
-    dot->t = EmuSeconds() ;
+    dot->charge = 1.0 ;
+    dot->level = level ;
+    dot->t = now ;
     idx = Hash(x, y) ;
     dot->next = DotHashTable[idx] ;
     DotHashTable[idx] = dot ;
@@ -263,9 +283,9 @@ int MaxAge ;			/* number of colour-table steps */
 float DotColor[REALMAXAGE][3] ;
 double PhosDecayStep ;		/* emulated seconds per table step */
 
-#define PHOS_R_HALFLIFE	0.08	/* seconds (fast blue flash) */
+#define PHOS_R_HALFLIFE	0.12	/* seconds (fast blue flash) */
 #define PHOS_G_HALFLIFE	0.50	/* seconds (long yellow-green afterglow) */
-#define PHOS_B_HALFLIFE	0.08
+#define PHOS_B_HALFLIFE	0.12
 #define PHOS_GAMMA	2.0
 #define PHOS_FLOOR	0.02
 
@@ -334,25 +354,34 @@ DrawDots()
     Dot *dot;
     int i ;
 
+    /* Phosphor emits light: blend additively so overlapping or tightly
+     * spaced hits accumulate and bloom.  Restore normal alpha blending
+     * afterwards for the logo/HUD. */
+    glBlendFunc(GL_ONE, GL_ONE) ;
     glBegin(GL_POINTS) ;
 	for (i=0; i<HASH_SIZE; i++) {
 	    dot = DotHashTable[i] ;
 	    while (dot) {
-		glColor4f(DotColor[dot->age][0],
-		    DotColor[dot->age][1],
-		    DotColor[dot->age][2],
-		    DotColor[dot->age][0]) ;
+		/* overall exposure grows toward 1 with repeated hits */
+		float exposure = 1.0 - exp(-dot->charge) ;
+		float r = DotColor[dot->age][0] * dot->level * exposure ;
+		float g = DotColor[dot->age][1] * dot->level * exposure ;
+		float b = DotColor[dot->age][2] * dot->level * exposure ;
+
+		/* alpha tracks overall brightness, not just the red channel */
+		glColor4f(r, g, b, MAX3(r, g, b)) ;
 		glVertex2i(dot->x, dot->y) ;
 		dot = dot->next ;
 	    }
 	}
     glEnd() ;
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) ;
 }
 
 
 
 void
-DisplayPoint(int x, int y)
+DisplayPoint(int x, int y, float level)
 {
     x >>= 8 ;
     y >>= 8 ;
@@ -360,7 +389,7 @@ DisplayPoint(int x, int y)
     if (x & 01000) { x |= ~01777; x++; } /* convert to two's complement */
     if (y & 01000) { y |= ~01777; y++; }
 
-    NewDot(x, y) ;
+    NewDot(x, y, level) ;
 }
 
 int 
@@ -716,8 +745,8 @@ PerformInstruction(int instruction)
 	DEBUG(IOT) ;
 	switch (instruction&077) {
 	case 07:
-		/* display a point */
-		DisplayPoint(AC, IO) ;
+		/* display a point (intensity in bits 6-8) */
+		DisplayPoint(AC, IO, DpyBrightness[(instruction >> 6) & 07]) ;
 		break ;
 	case 011:
 		/* read the control panel, needs to be filled in */
