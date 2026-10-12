@@ -2,15 +2,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <assert.h>
+
+#ifndef WIN32
+#include <unistd.h>	/* getpid() */
+#endif
+
 #include <GL/glut.h>
 #include <GL/gl.h>
-#include <assert.h>
 
 #include "ship.h"
 #include "logo.h"
 
+/* The simulator uses the POSIX *rand48() family.  Provide portable
+ * fallbacks where they are unavailable (e.g. Windows). */
 #ifdef WIN32
-#define lrand48()	rand()
+#ifndef srand48
+#define srand48(x)	srand((unsigned int)(x))
+#endif
+#ifndef lrand48
+#define lrand48()	((long)rand())
+#endif
+#ifndef drand48
+#define drand48()	((double)rand() / (double)RAND_MAX)
+#endif
 #endif /* WIN32 */
 
 /* 
@@ -198,7 +213,7 @@ NewDot(int x, int y)
     Dot *dot ;
     int idx ;
 
-    if (dot=FindDot(x, y)) {
+    if ((dot=FindDot(x, y))) {
 	dot->age = 0 ;
 	return ;
     }
@@ -852,7 +867,7 @@ displayfps()
 	glColor3f(0.1, 1.0, 0.1) ;
 	glTranslatef(-400, -400, 0) ;
 	glScalef(0.25, 0.25, 1.0) ;
-	for (i=0; i<strlen(cbuf); i++) 
+	for (i=0; i<(int)strlen(cbuf); i++) 
 	    glutStrokeCharacter(GLUT_STROKE_ROMAN, cbuf[i]) ;
     glPopMatrix() ;
 }
@@ -979,6 +994,7 @@ int timedelay = 0 ;
 /* ARGSUSED */ void
 idle(int value)
 {
+    (void)value ;
     ShipStatus status ;
 
     if (autoFlag) {
@@ -1167,8 +1183,9 @@ ShipFire(int ship, int flag)
 }
 
 /*ARGSUSED*/ void
-KeyDown(unsigned char key, int x, int y) 
+KeyDown(unsigned char key, int x, int y)
 {
+    (void)x ; (void)y ;
     switch (key) {
     case 'a': ShipSteerLeft(1, 1) ; break ;
     case 's': ShipThrust(1, 1) ; break ;
@@ -1184,6 +1201,7 @@ KeyDown(unsigned char key, int x, int y)
 /*ARGSUSED*/ void
 KeyUp(unsigned char key, int x, int y) 
 {
+    (void)x ; (void)y ;
     switch (key) {
     case 'a': ShipSteerLeft(1, 0) ; break ;
     case 's': ShipThrust(1, 0) ; break ;
@@ -1213,6 +1231,7 @@ reshape(int width, int height)
     glLoadIdentity() ;
 }
 
+int
 main(int argc, char *argv[])
 {
 

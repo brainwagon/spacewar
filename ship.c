@@ -5,8 +5,21 @@
 #include "ship.h"
 #include <GL/glut.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846264338327950288419716939937510
+#endif
+
+/* Portable fallbacks for the POSIX *rand48() family (e.g. Windows). */
 #ifdef WIN32
-const double M_PI = 3.14159265358979323846264338327950288419716939937510;
+#ifndef srand48
+#define srand48(x)	srand((unsigned int)(x))
+#endif
+#ifndef lrand48
+#define lrand48()	((long)rand())
+#endif
+#ifndef drand48
+#define drand48()	((double)rand() / (double)RAND_MAX)
+#endif
 #endif /* WIN32 */
 
 static int 
