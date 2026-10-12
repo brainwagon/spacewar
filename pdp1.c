@@ -105,7 +105,7 @@ PDP1Word Mem[MEMORY_SIZE] = {
 #define MAXSTEPS_PER_TICK	200000	/* bound catch-up work per timer tick */
 
 /* Time constant for phosphor hit accumulation (emulated seconds). */
-#define PHOS_CHARGE_HALFLIFE	0.20
+#define PHOS_CHARGE_HALFLIFE	0.10
 
 /* Type 30 display intensity, from the 3-bit field in the dpy instruction
  * (bits 6-8).  It is in 1's complement: 3 is brightest, 0 the default and
@@ -302,11 +302,11 @@ int MaxAge ;			/* number of colour-table steps */
 float DotColor[REALMAXAGE][3] ;
 double PhosDecayStep ;		/* emulated seconds per table step */
 
-#define PHOS_R_HALFLIFE	0.12	/* seconds (fast blue flash) */
-#define PHOS_G_HALFLIFE	0.50	/* seconds (long yellow-green afterglow) */
-#define PHOS_B_HALFLIFE	0.12
+#define PHOS_R_HALFLIFE	0.05	/* seconds (fast blue flash) */
+#define PHOS_G_HALFLIFE	0.15	/* seconds (yellow-green afterglow) */
+#define PHOS_B_HALFLIFE	0.05
 #define PHOS_GAMMA	2.0
-#define PHOS_FLOOR	0.02
+#define PHOS_FLOOR	0.05
 
 #define MAX(a,b)	((a)>(b)?(a):(b))
 #define MAX3(a,b,c)	MAX(MAX(a,b),c)
