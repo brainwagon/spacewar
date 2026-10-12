@@ -101,9 +101,15 @@ PDP1Word Mem[MEMORY_SIZE] = {
 
 #define DEBUG(x)
 
-	
+/* PDP-1 timing: one memory cycle is 5 microseconds (200,000 cycles/s). */
+#define PDP1_HZ			200000.0
+#define MAXSTEPS_PER_TICK	200000	/* bound catch-up work per timer tick */
 
 int executed ; 	/* number of instructions executed */
+double emu_cycles = 0.0 ;	/* PDP-1 cycles executed (drives phosphor timing) */
+
+int InstrCycles(int instruction) ;	/* defined with the timing code below */
+double EmuSeconds(void) ;		/* emulated seconds elapsed */
 int PC=4 ;	/* program counter */
 int AC=0;	/* accumulator */
 int OV=0;	/* overflow condition */
@@ -167,6 +173,7 @@ Y(int inst)
 typedef struct t_phosphordot {
     struct t_phosphordot *next ;
     int x, y, age ;
+    double t ;		/* emulated time (seconds) when last painted */
 } Dot ;
 
 Dot *FreeDot = NULL ;
@@ -215,6 +222,7 @@ NewDot(int x, int y)
 
     if ((dot=FindDot(x, y))) {
 	dot->age = 0 ;
+	dot->t = EmuSeconds() ;
 	return ;
     }
 
@@ -230,13 +238,68 @@ NewDot(int x, int y)
     dot->x = x ;
     dot->y = y ;
     dot->age = 0 ;
+    dot->t = EmuSeconds() ;
     idx = Hash(x, y) ;
     dot->next = DotHashTable[idx] ;
     DotHashTable[idx] = dot ;
 }
 
+/* Phosphor decay.
+ *
+ * The Type 30 uses a P7 phosphor: a fast blue flash followed by a
+ * long-lived yellow-green afterglow.  A drawn point is stored once and its
+ * brightness decays with *emulated* time (not with render frames), so the
+ * image looks the same regardless of the host frame rate or the selected
+ * emulation speed.  Repainting a point refreshes it to full brightness.
+ *
+ * Half-lives are in emulated seconds.  Colours are precomputed into a table
+ * of MaxAge steps spanning the time it takes the slowest channel to fade to
+ * PHOS_FLOOR.
+ */
+
+#define REALMAXAGE	(1024)
+
+int MaxAge ;			/* number of colour-table steps */
+float DotColor[REALMAXAGE][3] ;
+double PhosDecayStep ;		/* emulated seconds per table step */
+
+#define PHOS_R_HALFLIFE	0.08	/* seconds (fast blue flash) */
+#define PHOS_G_HALFLIFE	0.50	/* seconds (long yellow-green afterglow) */
+#define PHOS_B_HALFLIFE	0.08
+#define PHOS_GAMMA	2.0
+#define PHOS_FLOOR	0.02
+
+#define MAX(a,b)	((a)>(b)?(a):(b))
+#define MAX3(a,b,c)	MAX(MAX(a,b),c)
+
 void
-AgeDots(int maxage)
+InitDotColor(float rh, float gh, float bh, float dotgamma)
+{
+    float rk, gk, bk, tfloor ;
+    int i ;
+
+    rk = log(2.0) / rh ;	/* decay constants, per second */
+    gk = log(2.0) / gh ;
+    bk = log(2.0) / bh ;
+
+    /* emulated time for the slowest channel to fade to PHOS_FLOOR */
+    tfloor = MAX3(log(1.0/PHOS_FLOOR) / rk,
+		  log(1.0/PHOS_FLOOR) / gk,
+		  log(1.0/PHOS_FLOOR) / bk) ;
+
+    MaxAge = REALMAXAGE ;
+    PhosDecayStep = tfloor / (MaxAge - 1) ;
+
+    for (i=0; i<MaxAge; i++) {
+	float t = i * PhosDecayStep ;
+	DotColor[i][0] = pow(exp(-rk * t), 1.0/dotgamma) ;
+	DotColor[i][1] = pow(exp(-gk * t), 1.0/dotgamma) ;
+	DotColor[i][2] = pow(exp(-bk * t), 1.0/dotgamma) ;
+    }
+}
+
+void
+AgeDots(double now)
 {
     int i ;
     Dot *dot, *nextdot ;
@@ -246,10 +309,14 @@ AgeDots(int maxage)
         DotHashTable[i] = NULL ;
 
 	while (dot) {
-	    nextdot = dot->next ;
+	    int a ;
 
-	    dot->age++ ;
-	    if (dot->age < maxage) {
+	    nextdot = dot->next ;
+	    a = (int)((now - dot->t) / PhosDecayStep) ;
+	    if (a < 0)
+		a = 0 ;
+	    dot->age = a ;
+	    if (a < MaxAge) {
 		dot->next = DotHashTable[i] ;
 		DotHashTable[i] = dot ;
 	    } else {
@@ -258,40 +325,6 @@ AgeDots(int maxage)
 	    }
 	    dot = nextdot ;
 	}
-    }
-}
-
-#define REALMAXAGE	(200)
-
-int MaxAge ;
-float DotColor[REALMAXAGE][3] ;
-
-#define MAX(a,b)	((a)>(b)?(a):(b))
-#define MAX3(a,b,c)	MAX(MAX(a,b),c)
-
-void
-InitDotColor(float rd, float gd, float bd, float dotgamma)
-{
-    float rk, gk, bk ;
-    int rm, gm, bm, i ;
-
-    rk = log(0.5) / -rd ;
-    gk = log(0.5) / -gd ;
-    bk = log(0.5) / -bd ;
-
-    rm = ceil(log(0.03) / -rk) ;
-    gm = ceil(log(0.03) / -gk) ;
-    bm = ceil(log(0.03) / -bk) ;
-
-    MaxAge = MAX3(rm, gm, bm) ;
-
-    if (MaxAge >= REALMAXAGE) 
-	abort() ;
-
-    for (i=0; i<MaxAge; i++) {
-	DotColor[i][0] = pow(exp(-rk * i), 1.0/dotgamma) ;
-	DotColor[i][1] = pow(exp(-gk * i), 1.0/dotgamma) ;
-	DotColor[i][2] = pow(exp(-bk * i), 1.0/dotgamma) ;
     }
 }
 
@@ -790,6 +823,7 @@ SingleStep()
 	break ;
     }
     executed++ ;
+    emu_cycles += InstrCycles(instruction) ;
 }
 
 enum {
@@ -892,7 +926,7 @@ display(void)
 
     /* now, do the rest */
     DrawDots() ;
-    AgeDots(MaxAge) ;
+    AgeDots(EmuSeconds()) ;
 
     if (HUD) {
 	int nx1 = 03415 ;
@@ -989,7 +1023,49 @@ ComputeShipStatus(ShipStatus *status)
     status->th[1] = Mem[NTH+1] / 16384.0 ;
 }
 
-int timedelay = 0 ;
+/* PDP-1 timing.
+ *
+ * The PDP-1 memory cycle is 5 microseconds, i.e. 200,000 cycles per second
+ * (PDP1_HZ, defined above).  An instruction costs one cycle to fetch, plus
+ * one more if it references memory, plus one per level of indirect
+ * addressing.  The emulation is throttled to this rate by default so that
+ * programs (and Spacewar!) run at their true speed.  A speed factor of 0
+ * disables throttling entirely.
+ */
+double speed_scale = 1.0 ;	/* 1.0 = real PDP-1 speed, 0.0 = unthrottled */
+double cycles_owed = 0.0 ;	/* real-time cycle budget carried between ticks */
+int timedelay = 5 ;		/* timer interval in ms (refresh/responsiveness) */
+
+/* Number of PDP-1 memory cycles consumed by an instruction. */
+int
+InstrCycles(int instruction)
+{
+    int cycles = 1 ;			/* instruction fetch */
+
+    switch (OPERATOR(instruction)) {
+    case LAW:
+    case JMP:
+    case JSP:
+    case SKP:
+    case SFT:
+    case OPR:
+    case IOT:
+	break ;				/* internal instruction: no operand fetch */
+    default:
+	cycles++ ;			/* memory reference */
+	break ;
+    }
+    if (INDIRECT(instruction))
+	cycles++ ;			/* each level of indirection */
+    return cycles ;
+}
+
+/* Emulated PDP-1 time, in seconds. */
+double
+EmuSeconds(void)
+{
+    return emu_cycles / PDP1_HZ ;
+}
 
 /* ARGSUSED */ void
 idle(int value)
@@ -1003,16 +1079,38 @@ idle(int value)
 	ShipStrategy(1, 0, &status) ;
     }
 
-#if 0
-    do {
-	SingleStep() ;
-    } while (PC != 02051) ;
-#else
-    int cnt ;
-    for (cnt=0; cnt<1000;cnt++) {
-        SingleStep();
+    if (speed_scale <= 0.0) {
+	/* Unthrottled: run a fixed batch as fast as the host allows. */
+	int cnt ;
+	for (cnt=0; cnt<1000;cnt++) {
+	    SingleStep();
+	}
+    } else {
+	/* Throttle to the real PDP-1 cycle rate, measured against wall
+	 * clock time so the average speed is independent of timer jitter. */
+	static int last = -1 ;
+	int now = glutGet(GLUT_ELAPSED_TIME) ;
+	int steps = 0 ;
+	double dt ;
+
+	if (last < 0)
+	    last = now ;
+	dt = (now - last) / 1000.0 ;
+	last = now ;
+	if (dt > 0.25)
+	    dt = 0.25 ;			/* don't over-catch-up after a stall */
+
+	cycles_owed += dt * PDP1_HZ * speed_scale ;
+
+	while (cycles_owed >= 1.0 && steps < MAXSTEPS_PER_TICK) {
+	    int c = InstrCycles(Mem[PC]) ;
+	    if (cycles_owed < c)
+		break ;
+	    SingleStep() ;
+	    cycles_owed -= c ;
+	    steps++ ;
+	}
     }
-#endif
 
     glutPostRedisplay() ;
     glutTimerFunc(timedelay, idle, 0) ;
@@ -1097,20 +1195,14 @@ MenuFunc(int cmd)
 
 
 void
-FPSFunc(int fps)
+FPSFunc(int speed)
 {
-    switch (fps) {
-    case 24:
-	timedelay = 20 ;
-	break ;
-    case 30:
-	timedelay = 15 ;
-	break ;
-    case 60:
+    if (speed <= 0) {
+	speed_scale = 0.0 ;	/* unthrottled */
+	timedelay = 0 ;		/* refresh as fast as the host allows */
+    } else {
+	speed_scale = speed / 100.0 ;
 	timedelay = 5 ;
-	break ;
-    default:
-        timedelay = 0 ;
     }
 }
 
@@ -1238,7 +1330,7 @@ main(int argc, char *argv[])
     srand48((long)getpid()) ;
 
     InitDotHashFunc() ;
-    InitDotColor(3.0, 8.0, 3.0, 2.0) ;
+    InitDotColor(PHOS_R_HALFLIFE, PHOS_G_HALFLIFE, PHOS_B_HALFLIFE, PHOS_GAMMA) ;
 
     /* initialize glut */
     glutInit(&argc, argv) ;
@@ -1276,10 +1368,10 @@ main(int argc, char *argv[])
 	int fpsmenu = glutCreateMenu(FPSFunc) ;
 
 	glutSetMenu(fpsmenu) ;
-	glutAddMenuEntry("24 fps", 24) ;
-	glutAddMenuEntry("30 fps", 30) ;
-	glutAddMenuEntry("60 fps", 60) ;
-	glutAddMenuEntry("Maximum", 10000) ;
+	glutAddMenuEntry("Real PDP-1 (200 kHz)", 100) ;
+	glutAddMenuEntry("Half speed", 50) ;
+	glutAddMenuEntry("Double speed", 200) ;
+	glutAddMenuEntry("Maximum (unthrottled)", 0) ;
 
 	glutSetMenu(menu) ;
 	glutAddMenuEntry("Toggle Auto Play", 5) ;
@@ -1288,7 +1380,7 @@ main(int argc, char *argv[])
 	glutAddMenuEntry("Toggle FPS Display", 7) ;
 	glutAddMenuEntry("Toggle HUD", 4) ;
 	glutAddMenuEntry("Toggle Ego Mode", 6) ;
-	glutAddSubMenu("Set Target FPS", fpsmenu) ;
+	glutAddSubMenu("Set Speed", fpsmenu) ;
 	glutAddMenuEntry("Quit", 1) ;
 	glutAttachMenu(GLUT_RIGHT_BUTTON) ;
 
