@@ -1,0 +1,11 @@
+#
+
+LDFLAGS=-n32 -L/u0/markv/glut-3.7/lib/glut.n32
+CFLAGS=-n32 -O -I/u0/markv/glut-3.7/include
+LIBS=-lglut -lGLU -lGL -lXmu -lX11 -lm
+
+
+pdp1:	pdp1.o ship.o logo.o
+	$(CC) -o pdp1 pdp1.o ship.o logo.o $(LDFLAGS) $(LIBS)
+
+pdp1.o: logo.h

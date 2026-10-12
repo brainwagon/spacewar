@@ -1,0 +1,23 @@
+# Baseline import of the PDP-1 simulator.
+# Track authored source only. Build products, generated data, media and
+# backups are ignored (allowlist below: ignore everything, re-include source).
+
+*
+
+# allow directory traversal
+!*/
+
+# source
+!*.c
+!*.h
+!*.pl
+!*.py
+!Makefile
+!Makefile.*
+!README
+!.gitignore
+
+# generated data headers (arrays pulled in from paper-tape images)
+snowflake.h
+snowflake2.h
+spacewar.mem.h
