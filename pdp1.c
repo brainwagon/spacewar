@@ -8,8 +8,7 @@
 #include <unistd.h>	/* getpid() */
 #endif
 
-#include <GL/glut.h>
-#include <GL/gl.h>
+#include <raylib.h>
 
 #include "ship.h"
 #include "logo.h"
@@ -138,7 +137,27 @@ double FPS ;
 int FPSvalid = 0 ;
 int FPSflag = 0 ;
 
-GLuint logoName ;
+Texture2D logoTexture ;
+
+/* View transform: emulator coordinates are [-512,512] with y up and the
+ * origin at the centre of the scope; raylib's origin is the top-left with
+ * y down.  viewScale maps logical units to pixels. */
+float viewScale = 1.0f ;
+float viewCX = 512.0f, viewCY = 512.0f ;
+float sceneTheta = 0.0f ;	/* radians, for Spin mode */
+
+Vector2
+ToScreen(float x, float y)
+{
+    float rx = x, ry = y ;
+
+    if (sceneTheta != 0.0f) {
+	float c = cosf(sceneTheta), s = sinf(sceneTheta) ;
+	rx = x * c - y * s ;
+	ry = x * s + y * c ;
+    }
+    return (Vector2){ viewCX + rx * viewScale, viewCY - ry * viewScale } ;
+}
 
 int
 incpc()
@@ -353,29 +372,36 @@ DrawDots()
 {
     Dot *dot;
     int i ;
+    float sz = (HeavyDots ? 2.0f : 1.0f) * viewScale ;
+
+    if (sz < 1.0f)
+	sz = 1.0f ;
 
     /* Phosphor emits light: blend additively so overlapping or tightly
-     * spaced hits accumulate and bloom.  Restore normal alpha blending
-     * afterwards for the logo/HUD. */
-    glBlendFunc(GL_ONE, GL_ONE) ;
-    glBegin(GL_POINTS) ;
-	for (i=0; i<HASH_SIZE; i++) {
-	    dot = DotHashTable[i] ;
-	    while (dot) {
-		/* overall exposure grows toward 1 with repeated hits */
-		float exposure = 1.0 - exp(-dot->charge) ;
-		float r = DotColor[dot->age][0] * dot->level * exposure ;
-		float g = DotColor[dot->age][1] * dot->level * exposure ;
-		float b = DotColor[dot->age][2] * dot->level * exposure ;
+     * spaced hits accumulate and bloom. */
+    BeginBlendMode(BLEND_ADDITIVE) ;
+    for (i=0; i<HASH_SIZE; i++) {
+	dot = DotHashTable[i] ;
+	while (dot) {
+	    /* overall exposure grows toward 1 with repeated hits */
+	    float exposure = 1.0f - expf(-dot->charge) ;
+	    float r = DotColor[dot->age][0] * dot->level * exposure ;
+	    float g = DotColor[dot->age][1] * dot->level * exposure ;
+	    float b = DotColor[dot->age][2] * dot->level * exposure ;
+	    Color c = {
+		(unsigned char)(255.0f * r),
+		(unsigned char)(255.0f * g),
+		(unsigned char)(255.0f * b),
+		255
+	    } ;
+	    Vector2 p = ToScreen(dot->x, dot->y) ;
 
-		/* alpha tracks overall brightness, not just the red channel */
-		glColor4f(r, g, b, MAX3(r, g, b)) ;
-		glVertex2i(dot->x, dot->y) ;
-		dot = dot->next ;
-	    }
+	    DrawRectangle((int)(p.x - sz * 0.5f), (int)(p.y - sz * 0.5f),
+		(int)sz, (int)sz, c) ;
+	    dot = dot->next ;
 	}
-    glEnd() ;
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) ;
+    }
+    EndBlendMode() ;
 }
 
 
@@ -845,16 +871,6 @@ SingleStep()
 
     PerformInstruction(instruction) ;
 
-    switch (PC) {
-    case 01130:
-	/* Draw the background stars */
-	glColor3f(1.0, 1.0, 1.0) ;
-	break ;
-    case 0650:
-	/* Drawing the sun */
-	glColor3f(1.0, 1.0, 0.0) ;
-	break ;
-    }
     executed++ ;
     emu_cycles += InstrCycles(instruction) ;
 }
@@ -890,25 +906,17 @@ displaylogo()
 	    logoy = drand48() * 800.0 - 400.0 ;
 	}
     } else if (logostatus == LOGO_DISPLAYED) {
-    	
-	/* draw the logo */
-	glPushMatrix() ;
-	glTranslatef(logox,  logoy, 0.0) ;
-	glEnable(GL_TEXTURE_2D) ;
 
-	    glBindTexture(GL_TEXTURE_2D, logoName) ;
+	/* draw the logo (a 400x100 logical-unit quad centred at logox,logoy) */
+	Vector2 tl = ToScreen(logox - 200.0f, logoy + 50.0f) ;
+	Rectangle src = { 0.0f, 0.0f, (float)logoTexture.width,
+			  (float)logoTexture.height } ;
+	Rectangle dst = { tl.x, tl.y, 400.0f * viewScale, 100.0f * viewScale } ;
+	Color tint = { 255, 255, 255,
+		       (unsigned char)(255.0f * logobrightness(logoage)) } ;
 
-	    glColor4f(1.0, 1.0, 1.0, logobrightness(logoage)) ;
-
-	    glBegin(GL_QUADS) ;
-		glTexCoord2f(0.0, 1.0) ;    glVertex2f(-200.0, -50.0) ;
-		glTexCoord2f(0.0, 0.0) ;    glVertex2f(-200.0,  50.0) ;
-		glTexCoord2f(1.0, 0.0) ;    glVertex2f( 200.0,  50.0) ;
-		glTexCoord2f(1.0, 1.0) ;    glVertex2f( 200.0, -50.0) ;
-	    glEnd() ;
-
-	glDisable(GL_TEXTURE_2D) ;
-	glPopMatrix() ;
+	DrawTexturePro(logoTexture, src, dst, (Vector2){ 0.0f, 0.0f },
+	    0.0f, tint) ;
 
 	logoage -- ;
 
@@ -923,20 +931,15 @@ void
 displayfps()
 {
     char cbuf[80] ;
-    int i ;
 
     if (!FPSvalid || !FPSflag)
     	return ;
 
     sprintf(cbuf, "%d fps", (int)(FPS+0.5)) ;
 
-    glPushMatrix() ;
-	glColor3f(0.1, 1.0, 0.1) ;
-	glTranslatef(-400, -400, 0) ;
-	glScalef(0.25, 0.25, 1.0) ;
-	for (i=0; i<(int)strlen(cbuf); i++) 
-	    glutStrokeCharacter(GLUT_STROKE_ROMAN, cbuf[i]) ;
-    glPopMatrix() ;
+    Vector2 p = ToScreen(-400.0f, -400.0f) ;
+    DrawText(cbuf, (int)p.x, (int)p.y, (int)(30.0f * viewScale) + 1,
+	(Color){ 26, 255, 26, 255 }) ;
 }
 
 void
@@ -944,14 +947,12 @@ display(void)
 {
     static float theta = 0.0 ;
 
-    glPushMatrix() ;
-
     if (Spin) {
         theta += 3.3 ;
 	if (theta > 360.0)
 	    theta = 0.0 ;
-	glRotatef(theta, 0, 0, 1) ;
     }
+    sceneTheta = Spin ? (theta * PI / 180.0f) : 0.0f ;
 
 
     displaylogo() ;
@@ -981,47 +982,32 @@ display(void)
 	    dy = Mem[ndy+i] >> 8 ;
 	    if (dy & 01000) { dy |= ~01777; dy++; } 
         
-	    glBegin(GL_LINES) ;
-		glColor3f(1.0, 0.0, 0.0) ;
-		glVertex2i(x, y-10) ;
-		glVertex2i(x, y+10) ;
-	    glEnd() ;
-
-	    glBegin(GL_LINES) ;
-		glColor3f(1.0, 0.0, 0.0) ;
-		glVertex2i(x-10, y) ;
-		glVertex2i(x+10, y) ;
-	    glEnd() ;
-
-	    glBegin(GL_LINES) ;
-		glColor3f(0.0, 0.5, 1.0) ;
-		glVertex2i(x, y) ;
-		glVertex2i(x+dx, y+dy) ;
-	    glEnd() ;
+	    DrawLineV(ToScreen(x, y-10), ToScreen(x, y+10),
+		(Color){ 255, 0, 0, 255 }) ;
+	    DrawLineV(ToScreen(x-10, y), ToScreen(x+10, y),
+		(Color){ 255, 0, 0, 255 }) ;
+	    DrawLineV(ToScreen(x, y), ToScreen(x+dx, y+dy),
+		(Color){ 0, 128, 255, 255 }) ;
 
 	    if (i < 2) {
-		float a = (180.0 * Mem[nth+i]) / (3.14159 * 16384.0) ;
-		glPushMatrix() ;
-		glTranslatef(x, y, 0) ;
-		glRotatef(a, 0.0, 0.0, 1.0) ;
-		glBegin(GL_POLYGON) ;
-		    glColor4f(0.0, 0.5, 0.0, 0.5) ;
-		    glVertex2f(0.0, 30.0) ;
-		    glVertex2f(-12.0, -10.0) ;
-		    glVertex2f( 12.0, -10.0) ;
-		glEnd() ;
-		glPopMatrix() ;
+		float a = (180.0 * Mem[nth+i]) / (PI * 16384.0) ;
+		float ar = a * PI / 180.0f ;
+		float ca = cosf(ar), sa = sinf(ar) ;
+		float vx[3] = { 0.0f, -12.0f, 12.0f } ;
+		float vy[3] = { 30.0f, -10.0f, -10.0f } ;
+		Vector2 v[3] ;
+		int k ;
+
+		for (k=0; k<3; k++) {
+		    float rx = vx[k]*ca - vy[k]*sa ;
+		    float ry = vx[k]*sa + vy[k]*ca ;
+		    v[k] = ToScreen(x+rx, y+ry) ;
+		}
+		/* screen y is flipped, so wind the triangle the other way */
+		DrawTriangle(v[0], v[2], v[1], (Color){ 0, 128, 0, 128 }) ;
 	    }
 	}
     }
-
-    glPopMatrix() ;
-
-    glutSwapBuffers() ;
-
-    glClearColor(0.0, 0.0, 0.0, 0.0) ;
-    glClear(GL_COLOR_BUFFER_BIT) ;
-
 }
 
 #define NX1 (03415)
@@ -1066,8 +1052,7 @@ ComputeShipStatus(ShipStatus *status)
  * disables throttling entirely.
  */
 double speed_scale = 1.0 ;	/* 1.0 = real PDP-1 speed, 0.0 = unthrottled */
-double cycles_owed = 0.0 ;	/* real-time cycle budget carried between ticks */
-int timedelay = 5 ;		/* timer interval in ms (refresh/responsiveness) */
+double cycles_owed = 0.0 ;	/* real-time cycle budget carried between frames */
 
 /* Number of PDP-1 memory cycles consumed by an instruction. */
 int
@@ -1100,10 +1085,10 @@ EmuSeconds(void)
     return emu_cycles / PDP1_HZ ;
 }
 
-/* ARGSUSED */ void
-idle(int value)
+/* Run one slice of emulation (called once per rendered frame). */
+void
+emulate(void)
 {
-    (void)value ;
     ShipStatus status ;
 
     if (autoFlag) {
@@ -1120,15 +1105,15 @@ idle(int value)
 	}
     } else {
 	/* Throttle to the real PDP-1 cycle rate, measured against wall
-	 * clock time so the average speed is independent of timer jitter. */
-	static int last = -1 ;
-	int now = glutGet(GLUT_ELAPSED_TIME) ;
+	 * clock time so the average speed is independent of frame rate. */
+	static double last = -1.0 ;
+	double now = GetTime() ;
 	int steps = 0 ;
 	double dt ;
 
-	if (last < 0)
+	if (last < 0.0)
 	    last = now ;
-	dt = (now - last) / 1000.0 ;
+	dt = now - last ;
 	last = now ;
 	if (dt > 0.25)
 	    dt = 0.25 ;			/* don't over-catch-up after a stall */
@@ -1145,34 +1130,8 @@ idle(int value)
 	}
     }
 
-    glutPostRedisplay() ;
-    glutTimerFunc(timedelay, idle, 0) ;
-
-    /* compute frames per second...
-     */
-
-#define NTIMES	100	/* average frame times over NTIMES */
-    {
-    	static int stime[NTIMES], ctime, ftime ;
-	static int idx = 0 ;
-
-	if (!FPSvalid) {
-	    stime[idx] = glutGet(GLUT_ELAPSED_TIME) ;
-	    idx ++ ;
-	    if (idx >= NTIMES) {
-	    	FPSvalid = 1 ;
-		idx = 0 ;
-	    }
-	} else {
-	    ctime = glutGet(GLUT_ELAPSED_TIME) ;
-	    ftime = (ctime - stime[idx]) / NTIMES ;
-	    FPS = 1000.0 / ftime ;
-	    stime[idx] = ctime ;
-	    idx ++ ;
-	    if (idx >= NTIMES)
-	    	idx = 0 ;
-	}
-    }
+    FPS = GetFPS() ;
+    FPSvalid = (GetTime() > 0.5) ;
 }
 
 
@@ -1188,10 +1147,6 @@ MenuFunc(int cmd)
 	break ;
     case 3:
 	HeavyDots = !HeavyDots ;
-	if (HeavyDots)
-	    glPointSize(2.0) ;
-	else
-	    glPointSize(1.0) ;
 	break ;
     case 4:
 	HUD = !HUD ;
@@ -1232,10 +1187,10 @@ FPSFunc(int speed)
 {
     if (speed <= 0) {
 	speed_scale = 0.0 ;	/* unthrottled */
-	timedelay = 0 ;		/* refresh as fast as the host allows */
+	SetTargetFPS(0) ;	/* run the loop as fast as the host allows */
     } else {
 	speed_scale = speed / 100.0 ;
-	timedelay = 5 ;
+	SetTargetFPS(60) ;
     }
 }
 
@@ -1307,127 +1262,113 @@ ShipFire(int ship, int flag)
     }
 }
 
-/*ARGSUSED*/ void
-KeyDown(unsigned char key, int x, int y)
+/* Keyboard: ship 1 uses a/s/d/w, ship 0 uses j/k/l/i; the old right-click
+ * menu items are mapped to single keys. */
+void
+HandleInput(void)
 {
-    (void)x ; (void)y ;
-    switch (key) {
-    case 'a': ShipSteerLeft(1, 1) ; break ;
-    case 's': ShipThrust(1, 1) ; break ;
-    case 'd': ShipSteerRight(1, 1) ; break ;
-    case 'w': ShipFire(1, 1) ; break ;
-    case 'j': ShipSteerLeft(0, 1) ; break ;
-    case 'k': ShipThrust(0, 1) ; break ;
-    case 'l': ShipSteerRight(0, 1) ; break ;
-    case 'i': ShipFire(0, 1) ; break ;
-    }
-}
+    ShipSteerLeft(1, IsKeyDown(KEY_A)) ;
+    ShipThrust(1, IsKeyDown(KEY_S)) ;
+    ShipSteerRight(1, IsKeyDown(KEY_D)) ;
+    ShipFire(1, IsKeyDown(KEY_W)) ;
+    ShipSteerLeft(0, IsKeyDown(KEY_J)) ;
+    ShipThrust(0, IsKeyDown(KEY_K)) ;
+    ShipSteerRight(0, IsKeyDown(KEY_L)) ;
+    ShipFire(0, IsKeyDown(KEY_I)) ;
 
-/*ARGSUSED*/ void
-KeyUp(unsigned char key, int x, int y) 
-{
-    (void)x ; (void)y ;
-    switch (key) {
-    case 'a': ShipSteerLeft(1, 0) ; break ;
-    case 's': ShipThrust(1, 0) ; break ;
-    case 'd': ShipSteerRight(1, 0) ; break ;
-    case 'w': ShipFire(1, 0) ; break ;
-    case 'j': ShipSteerLeft(0, 0) ; break ;
-    case 'k': ShipThrust(0, 0) ; break ;
-    case 'l': ShipSteerRight(0, 0) ; break ;
-    case 'i': ShipFire(0, 0) ; break ;
-    }
+    if (IsKeyPressed(KEY_P)) MenuFunc(5) ;	/* auto play */
+    if (IsKeyPressed(KEY_M)) MenuFunc(3) ;	/* heavy dots */
+    if (IsKeyPressed(KEY_V)) MenuFunc(2) ;	/* heavy star */
+    if (IsKeyPressed(KEY_F)) MenuFunc(7) ;	/* fps display */
+    if (IsKeyPressed(KEY_H)) MenuFunc(4) ;	/* HUD */
+    if (IsKeyPressed(KEY_G)) MenuFunc(6) ;	/* ego mode (logo) */
+
+    if (IsKeyPressed(KEY_ONE))   FPSFunc(100) ;	/* real PDP-1 */
+    if (IsKeyPressed(KEY_TWO))   FPSFunc(50) ;	/* half speed */
+    if (IsKeyPressed(KEY_THREE)) FPSFunc(200) ;	/* double speed */
+    if (IsKeyPressed(KEY_FOUR))  FPSFunc(0) ;	/* maximum */
 }
 
 void
-reshape(int width, int height) 
+DrawHelp(void)
 {
-    glViewport(0, 0, (GLsizei) width, (GLsizei) height) ;
-    glMatrixMode(GL_PROJECTION) ;
-    glLoadIdentity() ;
-    if (width <= height) {
-	glOrtho(-512, 512, -512*(GLfloat)height/(GLfloat)width,
-		512*(GLfloat)height/(GLfloat)width, -1.0, 1.0) ;
-    } else {
-	glOrtho(-512*(GLfloat)width/(GLfloat)height,
-		512*(GLfloat)width/(GLfloat)height, -512, 512, -1.0, 1.0) ;
-    }
-    glMatrixMode(GL_MODELVIEW) ;
-    glLoadIdentity() ;
+    static const char *lines[] = {
+	"Spacewar! / PDP-1 emulator",
+	"",
+	"Ship 1:  A S D rotate/thrust,  W fire",
+	"Ship 0:  J K L rotate/thrust,  I fire",
+	"",
+	"P auto play     M heavy dots     V heavy star",
+	"F fps display   H HUD            G logo (ego mode)",
+	"1 real speed    2 half   3 double   4 maximum",
+	"TAB hide help   ESC quit",
+    } ;
+    int n = sizeof(lines) / sizeof(lines[0]) ;
+    int i, fs = (int)(18.0f * viewScale) + 1 ;
+    int x = (int)(20.0f * viewScale) + 10 ;
+    int y = (int)(20.0f * viewScale) + 10 ;
+
+    for (i=0; i<n; i++)
+	DrawText(lines[i], x, y + i*(fs+4), fs,
+	    (Color){ 170, 220, 170, 230 }) ;
 }
 
 int
 main(int argc, char *argv[])
 {
+    int showHelp = 1 ;
+    int i ;
+    Image img ;
+
+    (void)argc ; (void)argv ;
 
     srand48((long)getpid()) ;
 
     InitDotHashFunc() ;
     InitDotColor(PHOS_R_HALFLIFE, PHOS_G_HALFLIFE, PHOS_B_HALFLIFE, PHOS_GAMMA) ;
 
-    /* initialize glut */
-    glutInit(&argc, argv) ;
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB) ;
-    glutInitWindowPosition(100,100) ;
-    glutInitWindowSize(1024, 1024) ;
+    InitWindow(1024, 1024, "Spacewar") ;
+    SetTargetFPS(60) ;		/* display refresh; the emulation is
+				 * paced independently by wall-clock time */
 
-    glutCreateWindow("Spacewar") ;
-    /* glutFullScreen() ; */
+    /* build the logo texture from the alpha-only image */
+    img.width = TEX_XSIZE ;
+    img.height = TEX_YSIZE ;
+    img.mipmaps = 1 ;
+    img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 ;
+    img.data = MemAlloc(TEX_XSIZE * TEX_YSIZE * 4) ;
+    for (i=0; i<TEX_XSIZE*TEX_YSIZE; i++) {
+	((unsigned char *)img.data)[i*4+0] = 255 ;
+	((unsigned char *)img.data)[i*4+1] = 255 ;
+	((unsigned char *)img.data)[i*4+2] = 255 ;
+	((unsigned char *)img.data)[i*4+3] = logo_image[i] ;
+    }
+    logoTexture = LoadTextureFromImage(img) ;
+    SetTextureFilter(logoTexture, TEXTURE_FILTER_POINT) ;
+    UnloadImage(img) ;
 
-#ifdef WIN32
-    glEnable(GL_POINT_SMOOTH) ;
-    glHint(GL_POINT_SMOOTH_HINT, GL_NICEST) ;
-#endif
-    glPointSize(2.0) ;
-    glEnable(GL_BLEND) ;
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA) ;
+    while (!WindowShouldClose()) {
+	int w = GetScreenWidth(), h = GetScreenHeight() ;
 
-    /* initialize the logo texture maps */
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1) ;
-    glGenTextures(1, &logoName) ;
-    glBindTexture(GL_TEXTURE_2D, logoName) ;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP) ;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP) ;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, 
-    	GL_NEAREST) ;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, 
-    	GL_NEAREST) ;
-    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE) ;
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA8, TEX_XSIZE, TEX_YSIZE,
-    	0, GL_ALPHA, GL_UNSIGNED_BYTE, logo_image) ;
+	viewScale = (float)(w < h ? w : h) / 1024.0f ;
+	viewCX = w * 0.5f ;
+	viewCY = h * 0.5f ;
 
-    {
-	int menu = glutCreateMenu(MenuFunc) ;
-	int fpsmenu = glutCreateMenu(FPSFunc) ;
+	if (IsKeyPressed(KEY_TAB))
+	    showHelp = !showHelp ;
 
-	glutSetMenu(fpsmenu) ;
-	glutAddMenuEntry("Real PDP-1 (200 kHz)", 100) ;
-	glutAddMenuEntry("Half speed", 50) ;
-	glutAddMenuEntry("Double speed", 200) ;
-	glutAddMenuEntry("Maximum (unthrottled)", 0) ;
+	HandleInput() ;
+	emulate() ;
 
-	glutSetMenu(menu) ;
-	glutAddMenuEntry("Toggle Auto Play", 5) ;
-	glutAddMenuEntry("Toggle Heavy Dots", 3) ;
-	glutAddMenuEntry("Toggle Heavy Star", 2) ;
-	glutAddMenuEntry("Toggle FPS Display", 7) ;
-	glutAddMenuEntry("Toggle HUD", 4) ;
-	glutAddMenuEntry("Toggle Ego Mode", 6) ;
-	glutAddSubMenu("Set Speed", fpsmenu) ;
-	glutAddMenuEntry("Quit", 1) ;
-	glutAttachMenu(GLUT_RIGHT_BUTTON) ;
-
+	BeginDrawing() ;
+	    ClearBackground(BLACK) ;
+	    display() ;
+	    if (showHelp)
+		DrawHelp() ;
+	EndDrawing() ;
     }
 
-    glMatrixMode(GL_PROJECTION) ;
-    glLoadIdentity() ;
-    glOrtho(-512.0, 512.0, -512.0, 512.0, -1.0, 1.0) ;
-
-    glutReshapeFunc(reshape) ;
-    glutDisplayFunc(display) ;
-    glutIgnoreKeyRepeat(1) ;
-    glutTimerFunc(timedelay, idle, 0) ;
-    glutKeyboardFunc(KeyDown) ;
-    glutKeyboardUpFunc(KeyUp) ;
-    glutMainLoop() ;
+    UnloadTexture(logoTexture) ;
+    CloseWindow() ;
+    return 0 ;
 }

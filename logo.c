@@ -1,8 +1,6 @@
-#include <GL/glut.h>
-#include <GL/gl.h>
 #include "logo.h"
 
-GLubyte logo_image[] = {
+unsigned char logo_image[] = {
   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
   0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
