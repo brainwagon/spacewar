@@ -19,6 +19,8 @@
 !Makefile.*
 !README.md
 !.gitignore
+!screenshots/
+!screenshots/spacewar.png
 
 # ---- generated / derived files (explicit) ----
 # compiled binaries and objects
@@ -30,6 +32,8 @@ spacewar
 pdp1dump
 pdp1_mul_test
 pdp1_snowflake_test
+pdp1_munch_test
+munch
 core
 *.core
 

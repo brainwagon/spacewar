@@ -98,6 +98,10 @@ typedef int PDP1Word ;
 #define PDP1_START_ADDRESS 0500
 #define PDP1_PROGRAM_NAME "Minskytron"
 #define PDP1_INITIAL_TEST_WORD 0252525
+#elif defined(PDP1_DEMO_MUNCHING)
+#define PDP1_START_ADDRESS 0100
+#define PDP1_PROGRAM_NAME "Munching Squares"
+#define PDP1_INITIAL_TEST_WORD 0
 #elif defined(PDP1_DEMO_SNOWFLAKE)
 #define PDP1_START_ADDRESS 0100
 #define PDP1_PROGRAM_NAME "Snowflake"
@@ -109,7 +113,8 @@ typedef int PDP1Word ;
 #endif
 
 static const PDP1Word InitialMem[MEMORY_SIZE] = {
-#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE) || \
+    defined(PDP1_DEMO_MUNCHING)
 #include "demo_images.h"
 #else
 #include "spacewar.mem.h"
@@ -146,7 +151,7 @@ int AC=0;	/* accumulator */
 int OV=0;	/* overflow condition */
 int IO=0;	/* IO Register */
 int SW =
-#if defined(PDP1_DEMO_MINSKYTRON)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_MUNCHING)
     PDP1_INITIAL_TEST_WORD ;
 #else
     0x89 ;
@@ -906,7 +911,8 @@ SingleStep()
     emu_cycles += InstrCycles(instruction) ;
 }
 
-#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE) || \
+    defined(PDP1_DEMO_MUNCHING)
 /* demo_images.h keeps tape words in the octal spelling used by the
  * original listings; decode those digit sequences into 18-bit values. */
 static PDP1Word
@@ -930,7 +936,8 @@ ResetEmulator(void)
     int i ;
 
     memcpy(Mem, InitialMem, sizeof(Mem)) ;
-#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE) || \
+    defined(PDP1_DEMO_MUNCHING)
     for (i=0; i<MEMORY_SIZE; i++)
         if (Mem[i])
             Mem[i] = DecodeTapeWord(Mem[i]) ;
@@ -1164,7 +1171,8 @@ EmuSeconds(void)
 void
 emulate(void)
 {
-#if !defined(PDP1_DEMO_MINSKYTRON) && !defined(PDP1_DEMO_SNOWFLAKE)
+#if !defined(PDP1_DEMO_MINSKYTRON) && !defined(PDP1_DEMO_SNOWFLAKE) && \
+    !defined(PDP1_DEMO_MUNCHING)
     ShipStatus status ;
 
     if (autoFlag) {
@@ -1271,7 +1279,7 @@ FPSFunc(int speed)
     }
 }
 
-#if defined(PDP1_DEMO_MINSKYTRON)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_MUNCHING)
 static int
 TestWordSwitchAt(float x, float y)
 {
@@ -1305,7 +1313,11 @@ DrawTestWordConsole(void)
 
     DrawText("PDP-1 TEST WORD SWITCHES", 24, 933, 18,
         (Color){ 170, 220, 170, 255 }) ;
+#if defined(PDP1_DEMO_MINSKYTRON)
     snprintf(text, sizeof(text), "%06o octal   |   Click a switch; R restarts", SW) ;
+#else
+    snprintf(text, sizeof(text), "%06o octal   |   Click to change increment", SW) ;
+#endif
     DrawText(text, 450, 935, 16, (Color){ 170, 220, 170, 255 }) ;
 
     for (bit=0; bit<18; bit++) {
@@ -1323,8 +1335,13 @@ DrawTestWordConsole(void)
         DrawText(on ? "ON" : "OFF", (int)left + 5, 985, 12,
             RAYWHITE) ;
     }
+#if defined(PDP1_DEMO_MINSKYTRON)
     DrawText("Bit 0 is the leftmost / most-significant switch. Restart to apply.",
         24, 1015, 14, (Color){ 170, 180, 185, 255 }) ;
+#else
+    DrawText("Bit 0 is the leftmost / most-significant switch; zero uses 02345.",
+        24, 1015, 14, (Color){ 170, 180, 185, 255 }) ;
+#endif
 }
 #endif
 
@@ -1382,7 +1399,8 @@ SnowflakeSwitchAt(float x, float y)
 }
 #endif
 
-#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE) || \
+    defined(PDP1_DEMO_MUNCHING)
 void
 HandleDemoInput(void)
 {
@@ -1393,7 +1411,7 @@ HandleDemoInput(void)
     if (IsKeyPressed(KEY_THREE)) FPSFunc(200) ;
     if (IsKeyPressed(KEY_FOUR))  FPSFunc(0) ;
 
-#if defined(PDP1_DEMO_MINSKYTRON)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_MUNCHING)
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         Vector2 mouse = GetMousePosition() ;
         int bit = TestWordSwitchAt(mouse.x, mouse.y) ;
@@ -1488,7 +1506,8 @@ ShipFire(int ship, int flag)
 void
 HandleInput(void)
 {
-#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE) || \
+    defined(PDP1_DEMO_MUNCHING)
     HandleDemoInput() ;
 #else
     ShipSteerLeft(1, IsKeyDown(KEY_A)) ;
@@ -1536,6 +1555,15 @@ DrawHelp(void)
         "1 real speed    2 half   3 double   4 maximum",
         "TAB hide help   ESC quit",
     } ;
+#elif defined(PDP1_DEMO_MUNCHING)
+    static const char *lines[] = {
+        "Munching Squares / PDP-1 emulator",
+        "",
+        "Click Test Word switches to change the increment.",
+        "A zero Test Word selects the traditional 02345 increment.",
+        "R restart    1 real speed    2 half   3 double   4 maximum",
+        "TAB hide help   ESC quit",
+    } ;
 #else
     static const char *lines[] = {
         "Spacewar! / PDP-1 emulator",
@@ -1573,7 +1601,8 @@ main(int argc, char *argv[])
     InitDotHashFunc() ;
     InitDotColor(PHOS_R_HALFLIFE, PHOS_G_HALFLIFE, PHOS_B_HALFLIFE, PHOS_GAMMA) ;
 
-#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE) || \
+    defined(PDP1_DEMO_MUNCHING)
     InitWindow(1024, 1040, PDP1_PROGRAM_NAME) ;
 #else
     InitWindow(1024, 1024, PDP1_PROGRAM_NAME) ;
@@ -1602,7 +1631,8 @@ main(int argc, char *argv[])
     while (!WindowShouldClose()) {
 	int w = GetScreenWidth(), h = GetScreenHeight() ;
 
-#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE) || \
+    defined(PDP1_DEMO_MUNCHING)
 	viewScale = (float)(w < h-112 ? w : h-112) / 1024.0f ;
 	if (viewScale < 0.1f)
 	    viewScale = 0.1f ;
@@ -1623,6 +1653,8 @@ main(int argc, char *argv[])
 	    ClearBackground(BLACK) ;
 	    display() ;
 #if defined(PDP1_DEMO_MINSKYTRON)
+	    DrawTestWordConsole() ;
+#elif defined(PDP1_DEMO_MUNCHING)
 	    DrawTestWordConsole() ;
 #elif defined(PDP1_DEMO_SNOWFLAKE)
 	    DrawSnowflakeConsole() ;

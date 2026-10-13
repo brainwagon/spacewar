@@ -1,9 +1,11 @@
 # Portable Makefile for the PDP-1 simulator (raylib front end).
 #
-#   make           build all programs (./spacewar, ./minskytron, ./snowflake)
+#   make           build all programs (./spacewar, ./minskytron, ./snowflake,
+#                  ./munch)
 #   make minskytron build the Minskytron demo
 #   make snowflake  build the Snowflake demo
-#   make check     run PDP-1 arithmetic and Snowflake display checks
+#   make munch     build the Munching Squares demo
+#   make check     run PDP-1 arithmetic and display checks
 #   make clean     remove build products
 #
 # Override defaults as needed, e.g.
@@ -33,7 +35,7 @@ LDLIBS   += $(RAYLIB_LIBS)
 
 OBJS = spacewar.o ship.o logo.o
 
-all: spacewar minskytron snowflake
+all: spacewar minskytron snowflake munch
 
 spacewar: $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
@@ -44,15 +46,22 @@ minskytron: pdp1-minskytron.o ship.o logo.o
 snowflake: pdp1-snowflake.o ship.o logo.o
 	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
+munch: pdp1-munch.o ship.o logo.o
+	$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+
 pdp1_mul_test: pdp1_mul_test.c pdp1.c ship.c logo.c demo_images.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ pdp1_mul_test.c ship.c logo.c $(LDLIBS)
 
 pdp1_snowflake_test: pdp1_snowflake_test.c pdp1.c ship.c logo.c demo_images.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ pdp1_snowflake_test.c ship.c logo.c $(LDLIBS)
 
-check: pdp1_mul_test pdp1_snowflake_test
+pdp1_munch_test: pdp1_munch_test.c pdp1.c ship.c logo.c demo_images.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ pdp1_munch_test.c ship.c logo.c $(LDLIBS)
+
+check: pdp1_mul_test pdp1_snowflake_test pdp1_munch_test
 	./pdp1_mul_test
 	./pdp1_snowflake_test
+	./pdp1_munch_test
 
 spacewar.o: pdp1.c ship.h logo.h spacewar.mem.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ pdp1.c
@@ -62,10 +71,12 @@ pdp1-minskytron.o: pdp1.c ship.h logo.h demo_images.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DPDP1_DEMO_MINSKYTRON -c -o $@ $<
 pdp1-snowflake.o: pdp1.c ship.h logo.h demo_images.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) -DPDP1_DEMO_SNOWFLAKE -DPDP1_MUL_DIV -c -o $@ $<
+pdp1-munch.o: pdp1.c ship.h logo.h demo_images.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DPDP1_DEMO_MUNCHING -c -o $@ $<
 
 clean:
 	$(RM) $(OBJS) pdp1.o pdp1-minskytron.o pdp1-snowflake.o \
-		pdp1_mul_test pdp1_snowflake_test \
-		pdp1 spacewar minskytron snowflake
+		pdp1-munch.o pdp1_mul_test pdp1_snowflake_test pdp1_munch_test \
+		pdp1 spacewar minskytron snowflake munch
 
 .PHONY: all check clean

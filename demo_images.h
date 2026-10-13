@@ -299,4 +299,25 @@
     [0524] = 616,
     [0525] = 527,
     [0527] = 516014,
+#elif defined(PDP1_DEMO_MUNCHING)
+    /* Jackson Wright's classic Munching Squares loop. The Test Word
+     * is the increment; zero selects the traditional 02345 increment.
+     * 0100 lat       0101 sas 0112
+     * 0102 sza i     0103 law 2345
+     * 0104 add 7     0105 dac 7
+     * 0106 rcl 9s    0107 xor 7
+     * 0110 dpy-i+300 0111 jmp 0100
+     * 0112 777777
+     */
+    [0100] = 762200,
+    [0101] = 520112,
+    [0102] = 650100,
+    [0103] = 702345,
+    [0104] = 400007,
+    [0105] = 240007,
+    [0106] = 663777,
+    [0107] = 60007,
+    [0110] = 720307,
+    [0111] = 600100,
+    [0112] = 777777,
 #endif
