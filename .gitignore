@@ -17,7 +17,7 @@
 !*.py
 !Makefile
 !Makefile.*
-!README
+!README.md
 !.gitignore
 
 # ---- generated / derived files (explicit) ----
@@ -26,7 +26,10 @@
 *.a
 a.out
 pdp1
+spacewar
 pdp1dump
+pdp1_mul_test
+pdp1_snowflake_test
 core
 *.core
 

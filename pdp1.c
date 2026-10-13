@@ -93,10 +93,29 @@ typedef int PDP1Word ;
 /* The PDP1 has 4096 words of 18 bit memory. */
 
 #define MEMORY_SIZE	(4096)
-PDP1Word Mem[MEMORY_SIZE] = {
+
+#if defined(PDP1_DEMO_MINSKYTRON)
+#define PDP1_START_ADDRESS 0500
+#define PDP1_PROGRAM_NAME "Minskytron"
+#define PDP1_INITIAL_TEST_WORD 0252525
+#elif defined(PDP1_DEMO_SNOWFLAKE)
+#define PDP1_START_ADDRESS 0100
+#define PDP1_PROGRAM_NAME "Snowflake"
+#define PDP1_INITIAL_TEST_WORD 0
+#else
+#define PDP1_START_ADDRESS 4
+#define PDP1_PROGRAM_NAME "Spacewar"
+#define PDP1_INITIAL_TEST_WORD 0
+#endif
+
+static const PDP1Word InitialMem[MEMORY_SIZE] = {
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+#include "demo_images.h"
+#else
 #include "spacewar.mem.h"
-//#include "snowflake2.h"
+#endif
 } ;
+PDP1Word Mem[MEMORY_SIZE] ;
 
 #define DEBUG(x)
 
@@ -117,14 +136,22 @@ static const float DpyBrightness[8] = {
 
 int executed ; 	/* number of instructions executed */
 double emu_cycles = 0.0 ;	/* PDP-1 cycles executed (drives phosphor timing) */
+double speed_scale = 1.0 ;	/* 1.0 = real PDP-1 speed, 0.0 = unthrottled */
+double cycles_owed = 0.0 ;	/* real-time cycle budget carried between frames */
 
 int InstrCycles(int instruction) ;	/* defined with the timing code below */
 double EmuSeconds(void) ;		/* emulated seconds elapsed */
-int PC=4 ;	/* program counter */
+int PC=PDP1_START_ADDRESS ;	/* program counter */
 int AC=0;	/* accumulator */
 int OV=0;	/* overflow condition */
 int IO=0;	/* IO Register */
-int SW = 0x89 ;	/* switches */
+int SW =
+#if defined(PDP1_DEMO_MINSKYTRON)
+    PDP1_INITIAL_TEST_WORD ;
+#else
+    0x89 ;
+#endif
+	/* test word / switches */
 
 int Sense[19] = {0, 0, 0, 0, 0, 0, 0} ;
 int Flag[7] = {0, 0, 0, 0, 0, 0, 0} ;
@@ -372,7 +399,7 @@ DrawDots()
 {
     Dot *dot;
     int i ;
-    float sz = (HeavyDots ? 2.0f : 1.0f) * viewScale ;
+    int sz = (int)ceilf((HeavyDots ? 2.0f : 1.0f) * viewScale) ;
 
     if (sz < 1.0f)
 	sz = 1.0f ;
@@ -565,6 +592,10 @@ PerformInstruction(int instruction)
 	    (((tmpaddr&00007)==00005) && (Flag[5] == 0)) ||
 	    (((tmpaddr&00007)==00006) && (Flag[6] == 0)) ||
 	    (((tmpaddr&00007)==00007) && (FlagsZero()))) ;
+
+	/* SZO reads and then clears the overflow flag. */
+	if (tmpaddr & 01000)
+	    OV = 0 ;
 
 	if (INDIRECT(instruction))
 	    cond = !cond ;
@@ -875,6 +906,53 @@ SingleStep()
     emu_cycles += InstrCycles(instruction) ;
 }
 
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+/* demo_images.h keeps tape words in the octal spelling used by the
+ * original listings; decode those digit sequences into 18-bit values. */
+static PDP1Word
+DecodeTapeWord(PDP1Word digits)
+{
+    PDP1Word word = 0 ;
+    PDP1Word place = 1 ;
+
+    while (digits) {
+        word += (digits % 10) * place ;
+        place *= 8 ;
+        digits /= 10 ;
+    }
+    return word ;
+}
+#endif
+
+void
+ResetEmulator(void)
+{
+    int i ;
+
+    memcpy(Mem, InitialMem, sizeof(Mem)) ;
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+    for (i=0; i<MEMORY_SIZE; i++)
+        if (Mem[i])
+            Mem[i] = DecodeTapeWord(Mem[i]) ;
+#endif
+    PC = PDP1_START_ADDRESS ;
+    AC = IO = OV = 0 ;
+    executed = 0 ;
+    emu_cycles = 0.0 ;
+    cycles_owed = 0.0 ;
+
+    for (i=0; i<HASH_SIZE; i++) {
+        Dot *dot = DotHashTable[i] ;
+        while (dot) {
+            Dot *next = dot->next ;
+            dot->next = FreeDot ;
+            FreeDot = dot ;
+            dot = next ;
+        }
+        DotHashTable[i] = NULL ;
+    }
+}
+
 enum {
 	LOGO_DISABLED,
 	LOGO_DISPLAYED,
@@ -1051,9 +1129,6 @@ ComputeShipStatus(ShipStatus *status)
  * programs (and Spacewar!) run at their true speed.  A speed factor of 0
  * disables throttling entirely.
  */
-double speed_scale = 1.0 ;	/* 1.0 = real PDP-1 speed, 0.0 = unthrottled */
-double cycles_owed = 0.0 ;	/* real-time cycle budget carried between frames */
-
 /* Number of PDP-1 memory cycles consumed by an instruction. */
 int
 InstrCycles(int instruction)
@@ -1089,6 +1164,7 @@ EmuSeconds(void)
 void
 emulate(void)
 {
+#if !defined(PDP1_DEMO_MINSKYTRON) && !defined(PDP1_DEMO_SNOWFLAKE)
     ShipStatus status ;
 
     if (autoFlag) {
@@ -1096,6 +1172,7 @@ emulate(void)
 	ShipStrategy(0, 1, &status) ;
 	ShipStrategy(1, 0, &status) ;
     }
+#endif
 
     if (speed_scale <= 0.0) {
 	/* Unthrottled: run a fixed batch as fast as the host allows. */
@@ -1194,6 +1271,150 @@ FPSFunc(int speed)
     }
 }
 
+#if defined(PDP1_DEMO_MINSKYTRON)
+static int
+TestWordSwitchAt(float x, float y)
+{
+    const float pitch = 52.0f ;
+    const float buttonWidth = 38.0f ;
+    const float buttonY = 974.0f ;
+    const float buttonHeight = 36.0f ;
+    float startX = (GetScreenWidth() - 18.0f * pitch) * 0.5f ;
+    int bit ;
+
+    if (y < buttonY || y >= buttonY + buttonHeight)
+        return -1 ;
+
+    for (bit=0; bit<18; bit++) {
+        float left = startX + bit * pitch + (pitch-buttonWidth)*0.5f ;
+        if (x >= left && x < left + buttonWidth)
+            return bit ;
+    }
+    return -1 ;
+}
+
+static void
+DrawTestWordConsole(void)
+{
+    const float pitch = 52.0f ;
+    const float buttonWidth = 38.0f ;
+    const float buttonY = 974.0f ;
+    float startX = (GetScreenWidth() - 18.0f * pitch) * 0.5f ;
+    char text[96] ;
+    int bit ;
+
+    DrawText("PDP-1 TEST WORD SWITCHES", 24, 933, 18,
+        (Color){ 170, 220, 170, 255 }) ;
+    snprintf(text, sizeof(text), "%06o octal   |   Click a switch; R restarts", SW) ;
+    DrawText(text, 450, 935, 16, (Color){ 170, 220, 170, 255 }) ;
+
+    for (bit=0; bit<18; bit++) {
+        float left = startX + bit * pitch + (pitch-buttonWidth)*0.5f ;
+        int on = (SW & (1 << (17-bit))) != 0 ;
+        Rectangle button = { left, buttonY, buttonWidth, 36.0f } ;
+        Color fill = on ? (Color){ 77, 153, 112, 255 }
+                        : (Color){ 45, 51, 57, 255 } ;
+
+        DrawText(TextFormat("%d", bit), (int)left + 12, 956, 14,
+            (Color){ 185, 190, 195, 255 }) ;
+        DrawRectangleRec(button, fill) ;
+        DrawRectangleLinesEx(button, 1.0f,
+            (Color){ 145, 155, 160, 255 }) ;
+        DrawText(on ? "ON" : "OFF", (int)left + 5, 985, 12,
+            RAYWHITE) ;
+    }
+    DrawText("Bit 0 is the leftmost / most-significant switch. Restart to apply.",
+        24, 1015, 14, (Color){ 170, 180, 185, 255 }) ;
+}
+#endif
+
+#if defined(PDP1_DEMO_SNOWFLAKE)
+static void
+DrawSnowflakeConsole(void)
+{
+    const float switchY = 974.0f ;
+    const float switchWidth = 72.0f ;
+    const float switchHeight = 36.0f ;
+    const float pitch = 100.0f ;
+    const float startX = 440.0f ;
+    int n ;
+
+    DrawText("SENSE SWITCHES", 24, 933, 18,
+        (Color){ 170, 220, 170, 255 }) ;
+    DrawText("2: 8-dot mode    1 + 2: single dot", 250, 935, 16,
+        (Color){ 170, 220, 170, 255 }) ;
+    for (n=1; n<=2; n++) {
+        float left = startX + (n-1) * pitch ;
+        Rectangle button = { left, switchY, switchWidth, switchHeight } ;
+        Color fill = Sense[n] ? (Color){ 77, 153, 112, 255 }
+                               : (Color){ 45, 51, 57, 255 } ;
+
+        DrawText(TextFormat("Switch %d", n), (int)left + 3, 956, 14,
+            (Color){ 185, 190, 195, 255 }) ;
+        DrawRectangleRec(button, fill) ;
+        DrawRectangleLinesEx(button, 1.0f,
+            (Color){ 145, 155, 160, 255 }) ;
+        DrawText(Sense[n] ? "ON" : "OFF", (int)left + 20, 985, 12,
+            RAYWHITE) ;
+    }
+    DrawText("R restarts    1-4 change speed    TAB hides help", 24,
+        1015, 14, (Color){ 170, 180, 185, 255 }) ;
+}
+
+static int
+SnowflakeSwitchAt(float x, float y)
+{
+    const float switchY = 974.0f ;
+    const float switchWidth = 72.0f ;
+    const float switchHeight = 36.0f ;
+    const float pitch = 100.0f ;
+    const float startX = 440.0f ;
+    int n ;
+
+    if (y < switchY || y >= switchY + switchHeight)
+        return 0 ;
+    for (n=1; n<=2; n++) {
+        float left = startX + (n-1) * pitch ;
+        if (x >= left && x < left + switchWidth)
+            return n ;
+    }
+    return 0 ;
+}
+#endif
+
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+void
+HandleDemoInput(void)
+{
+    if (IsKeyPressed(KEY_R))
+        ResetEmulator() ;
+    if (IsKeyPressed(KEY_ONE))   FPSFunc(100) ;
+    if (IsKeyPressed(KEY_TWO))   FPSFunc(50) ;
+    if (IsKeyPressed(KEY_THREE)) FPSFunc(200) ;
+    if (IsKeyPressed(KEY_FOUR))  FPSFunc(0) ;
+
+#if defined(PDP1_DEMO_MINSKYTRON)
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        Vector2 mouse = GetMousePosition() ;
+        int bit = TestWordSwitchAt(mouse.x, mouse.y) ;
+        if (bit >= 0)
+            SW ^= 1 << (17-bit) ;
+    }
+#elif defined(PDP1_DEMO_SNOWFLAKE)
+    if (IsKeyPressed(KEY_F1))
+        Sense[1] = !Sense[1] ;
+    if (IsKeyPressed(KEY_F2))
+        Sense[2] = !Sense[2] ;
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        Vector2 mouse = GetMousePosition() ;
+        int sense = SnowflakeSwitchAt(mouse.x, mouse.y) ;
+        if (sense)
+            Sense[sense] = !Sense[sense] ;
+    }
+#endif
+}
+#endif
+
 void
 ShipSteerLeft(int ship, int flag) 
 {
@@ -1267,6 +1488,9 @@ ShipFire(int ship, int flag)
 void
 HandleInput(void)
 {
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+    HandleDemoInput() ;
+#else
     ShipSteerLeft(1, IsKeyDown(KEY_A)) ;
     ShipThrust(1, IsKeyDown(KEY_S)) ;
     ShipSteerRight(1, IsKeyDown(KEY_D)) ;
@@ -1287,13 +1511,34 @@ HandleInput(void)
     if (IsKeyPressed(KEY_TWO))   FPSFunc(50) ;	/* half speed */
     if (IsKeyPressed(KEY_THREE)) FPSFunc(200) ;	/* double speed */
     if (IsKeyPressed(KEY_FOUR))  FPSFunc(0) ;	/* maximum */
+#endif
 }
 
 void
 DrawHelp(void)
 {
+#if defined(PDP1_DEMO_MINSKYTRON)
     static const char *lines[] = {
-	"Spacewar! / PDP-1 emulator",
+        "Minskytron / PDP-1 emulator",
+        "",
+        "Click the 18 Test Word switches below the display.",
+        "R restart (the program reads the Test Word at startup)",
+        "1 real speed    2 half   3 double   4 maximum",
+        "TAB hide help   ESC quit",
+    } ;
+#elif defined(PDP1_DEMO_SNOWFLAKE)
+    static const char *lines[] = {
+        "Snowflake / PDP-1 emulator",
+        "",
+        "Click sense switches below; F1 / F2 also toggle switches 1 / 2.",
+        "Switch 2: 8-dot mode; switches 1 + 2: single-dot mode",
+        "R restart",
+        "1 real speed    2 half   3 double   4 maximum",
+        "TAB hide help   ESC quit",
+    } ;
+#else
+    static const char *lines[] = {
+        "Spacewar! / PDP-1 emulator",
 	"",
 	"Ship 1:  A S D rotate/thrust,  W fire",
 	"Ship 0:  J K L rotate/thrust,  I fire",
@@ -1301,8 +1546,9 @@ DrawHelp(void)
 	"P auto play     M heavy dots     V heavy star",
 	"F fps display   H HUD            G logo (ego mode)",
 	"1 real speed    2 half   3 double   4 maximum",
-	"TAB hide help   ESC quit",
+        "TAB hide help   ESC quit",
     } ;
+#endif
     int n = sizeof(lines) / sizeof(lines[0]) ;
     int i, fs = (int)(18.0f * viewScale) + 1 ;
     int x = (int)(20.0f * viewScale) + 10 ;
@@ -1327,9 +1573,15 @@ main(int argc, char *argv[])
     InitDotHashFunc() ;
     InitDotColor(PHOS_R_HALFLIFE, PHOS_G_HALFLIFE, PHOS_B_HALFLIFE, PHOS_GAMMA) ;
 
-    InitWindow(1024, 1024, "Spacewar") ;
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+    InitWindow(1024, 1040, PDP1_PROGRAM_NAME) ;
+#else
+    InitWindow(1024, 1024, PDP1_PROGRAM_NAME) ;
+#endif
     SetTargetFPS(60) ;		/* display refresh; the emulation is
 				 * paced independently by wall-clock time */
+
+    ResetEmulator() ;
 
     /* build the logo texture from the alpha-only image */
     img.width = TEX_XSIZE ;
@@ -1350,9 +1602,16 @@ main(int argc, char *argv[])
     while (!WindowShouldClose()) {
 	int w = GetScreenWidth(), h = GetScreenHeight() ;
 
+#if defined(PDP1_DEMO_MINSKYTRON) || defined(PDP1_DEMO_SNOWFLAKE)
+	viewScale = (float)(w < h-112 ? w : h-112) / 1024.0f ;
+	if (viewScale < 0.1f)
+	    viewScale = 0.1f ;
+	viewCY = (h - 112) * 0.5f ;
+#else
 	viewScale = (float)(w < h ? w : h) / 1024.0f ;
-	viewCX = w * 0.5f ;
 	viewCY = h * 0.5f ;
+#endif
+	viewCX = w * 0.5f ;
 
 	if (IsKeyPressed(KEY_TAB))
 	    showHelp = !showHelp ;
@@ -1363,6 +1622,11 @@ main(int argc, char *argv[])
 	BeginDrawing() ;
 	    ClearBackground(BLACK) ;
 	    display() ;
+#if defined(PDP1_DEMO_MINSKYTRON)
+	    DrawTestWordConsole() ;
+#elif defined(PDP1_DEMO_SNOWFLAKE)
+	    DrawSnowflakeConsole() ;
+#endif
 	    if (showHelp)
 		DrawHelp() ;
 	EndDrawing() ;
