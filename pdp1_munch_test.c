@@ -12,9 +12,30 @@ main(void)
 
     srand48(1);
     InitDotHashFunc();
+    if (SW != 06000) {
+        fprintf(stderr, "Munching Squares default Test Word is %06o, "
+            "expected 006000\n", SW);
+        return 1;
+    }
+
+    SW = 0;
     ResetEmulator();
-    for (step=0; step<200000; step++)
+    InitDotColor(PHOS_R_HALFLIFE, PHOS_G_HALFLIFE,
+        PHOS_B_HALFLIFE, PHOS_GAMMA);
+
+    for (step=0; step<9; step++)
         SingleStep();
+    if (Mem[7] != 02345 || PC != 0111) {
+        fprintf(stderr, "Test Word 000000: first increment is %06o, "
+            "expected 002345\n", Mem[7]);
+        return 1;
+    }
+
+    SW = 06000;
+    ResetEmulator();
+    for (step=0; step<500000; step++)
+        SingleStep();
+    AgeDots(EmuSeconds());
 
     for (bucket=0; bucket<HASH_SIZE; bucket++) {
         Dot *dot;
@@ -31,10 +52,11 @@ main(void)
         }
     }
 
-    printf("Munching Squares: steps=%d dots=%d "
-        "bounds=(%d..%d,%d..%d) increment=%06o\n",
-        step, count, minx, maxx, miny, maxy, Mem[7]);
-    if (count < 1000 || Mem[7] == 0 || minx == maxx || miny == maxy ||
+    printf("Munching Squares: Test Word=%06o steps=%d live-dots=%d "
+        "bounds=(%d..%d,%d..%d)\n",
+        SW,
+        step, count, minx, maxx, miny, maxy);
+    if (count < 30000 || Mem[7] == 0 || minx == maxx || miny == maxy ||
         maxx > 512 || minx < -512 || maxy > 512 || miny < -512)
         return 1;
 

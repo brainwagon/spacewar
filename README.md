@@ -70,9 +70,10 @@ single-dot mode.
 
 ### Munching Squares
 
-The demo runs a classic PDP-1 display loop. Click the Test Word switches
-to change the increment used by the loop. A zero Test Word selects the
-traditional octal increment `02345`.
+The demo starts with Test Word `006000`, the reference program's familiar
+square pattern. Click the switches to experiment with other increments.
+An all-zero Test Word selects the original program's fallback increment
+`02345`, which produces a different pattern.
 
 ## Program images
 

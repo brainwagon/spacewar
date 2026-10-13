@@ -101,7 +101,7 @@ typedef int PDP1Word ;
 #elif defined(PDP1_DEMO_MUNCHING)
 #define PDP1_START_ADDRESS 0100
 #define PDP1_PROGRAM_NAME "Munching Squares"
-#define PDP1_INITIAL_TEST_WORD 0
+#define PDP1_INITIAL_TEST_WORD 06000
 #elif defined(PDP1_DEMO_SNOWFLAKE)
 #define PDP1_START_ADDRESS 0100
 #define PDP1_PROGRAM_NAME "Snowflake"
@@ -129,7 +129,11 @@ PDP1Word Mem[MEMORY_SIZE] ;
 #define MAXSTEPS_PER_TICK	200000	/* bound catch-up work per timer tick */
 
 /* Time constant for phosphor hit accumulation (emulated seconds). */
+#if defined(PDP1_DEMO_MUNCHING)
+#define PHOS_CHARGE_HALFLIFE	0.20
+#else
 #define PHOS_CHARGE_HALFLIFE	0.10
+#endif
 
 /* Type 30 display intensity, from the 3-bit field in the dpy instruction
  * (bits 6-8).  It is in 1's complement: 3 is brightest, 0 the default and
@@ -334,11 +338,20 @@ int MaxAge ;			/* number of colour-table steps */
 float DotColor[REALMAXAGE][3] ;
 double PhosDecayStep ;		/* emulated seconds per table step */
 
+#if defined(PDP1_DEMO_MUNCHING)
+/* Munching Squares depends on several seconds of P7 afterglow for its
+ * successive frames to combine into the characteristic square pattern. */
+#define PHOS_R_HALFLIFE	0.12	/* seconds (fast blue flash) */
+#define PHOS_G_HALFLIFE	0.50	/* seconds (long yellow-green afterglow) */
+#define PHOS_B_HALFLIFE	0.12
+#define PHOS_FLOOR	0.02
+#else
 #define PHOS_R_HALFLIFE	0.05	/* seconds (fast blue flash) */
 #define PHOS_G_HALFLIFE	0.15	/* seconds (yellow-green afterglow) */
 #define PHOS_B_HALFLIFE	0.05
-#define PHOS_GAMMA	2.0
 #define PHOS_FLOOR	0.05
+#endif
+#define PHOS_GAMMA	2.0
 
 #define MAX(a,b)	((a)>(b)?(a):(b))
 #define MAX3(a,b,c)	MAX(MAX(a,b),c)
