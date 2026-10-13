@@ -1,9 +1,22 @@
 # Spacewar and PDP-1 demos
 
-Tom Duff started to do this; I thought I would as well.
+Some two decades or more ago, I happened to wander into Tom Duff's office
+at Pixar on a particularly slow day, and asked him what he was working on.
+He mentioned that he had discovered that you could get the original binary
+files for the classic game [Spacewar!](https://en.wikipedia.org/wiki/Spacewar!)
+that ran on the PDP-1.  He thought it would be fun to write an emulator for
+that machine. 
+
+I thought so to.  This is the one I tinkered together over the next few days.
+I took it with me as a conversation starter at my first Hackers! conference.
 
 This project emulates the PDP-1 display and runs Spacewar! alongside
 three other PDP-1 programs: Minskytron, Snowflake, and Munching Squares.
+
+I recently dusted off the code and revised it with GPT Luna.  It uncovered
+a bug I had missed in the handling of the overflow bit that kept me from 
+running the snowflake demo properly.  I also had Luna port it to using 
+the raylib library instead of the old style OpenGL.
 
 ![Spacewar! running in the PDP-1 emulator](screenshots/spacewar.png)
 
